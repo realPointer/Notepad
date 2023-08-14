@@ -2,64 +2,88 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/fatih/color"
 )
 
 const (
-	notepadFull     = "[Error] Notepad is full"
-	missingNoteArg  = "[Error] Missing note argument"
-	unknownCommand  = "[Error] Unknown command: %s\n"
-	invalidPosition = "[Error] Invalid position: %d\n"
-	nothingToUpdate = "[Error] There is nothing to update"
-	nothingToDelete = "[Error] There is nothing to delete"
-	invalidArgument = "[Error] Invalid argument"
-	cannotConvert   = "[Error] Cannot convert index to a number"
-	notepadEmpty    = "[Info] Notepad is empty"
-	noteDone        = "[Info] Note done"
-	noteUndone      = "[Info] Note undone"
-	noteAlreadyDone = "[Info] Note already done"
-	notepadExtended = "[Info] Notepad is extended to %d notes\n"
-	noteCreated     = "[OK] The note was successfully created"
-	noteUpdated     = "[OK] The note was successfully updated"
-	noteDeleted     = "[OK] The note was successfully deleted"
-	noteStatusDone  = "Status: Done"
-	farewell        = "[Info] Goodbye!"
+	invalidArgument = "invalid argument"
+	initialMaxNotes = 10
 )
 
 type Note struct {
-	Text string
-	Done bool
+	Text   string `json:"text"`
+	Status bool   `json:"status"`
 }
 
 type Notepad struct {
-	Notes      []*Note
-	MaxNotes   int
-	CurrentIdx int
+	Notes []*Note
 }
 
 func main() {
-	notepad := NewNotepad(10)
+	notepad := newNotepad(initialMaxNotes)
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
-		command, text := GetInput(scanner)
-
+		color.Blue("Enter a command and data: ")
+		fmt.Print("> ")
+		command, text := getInput(scanner)
 		switch command {
-		case "extend":
-			notepad.Extend(text)
+		case "save":
+			err := notepad.Save(text)
+			if err != nil {
+				printError(err.Error())
+			} else {
+				printOK("Notepad saved to file")
+			}
+		case "load":
+			err := notepad.Load(text)
+			if err != nil {
+				printError(err.Error())
+			} else {
+				printOK("Notepad loaded from file")
+			}
 		case "create":
-			notepad.Create(text)
+			err := notepad.Create(text)
+			if err != nil {
+				printError(err.Error())
+			} else {
+				printOK("Note was successfully created")
+			}
 		case "done":
-			notepad.Done(text)
+			err := notepad.SetStatus(text, true)
+			if err != nil {
+				printError(err.Error())
+			} else {
+				printOK("Note marked as done")
+			}
 		case "undone":
-			notepad.Undone(text)
+			err := notepad.SetStatus(text, false)
+			if err != nil {
+				printError(err.Error())
+			} else {
+				printOK("Note marked as not done")
+			}
 		case "update":
-			notepad.Update(text)
+			err := notepad.Update(text)
+			if err != nil {
+				printError(err.Error())
+			} else {
+				printOK("Note updated")
+			}
 		case "delete":
-			notepad.Delete(text)
+			err := notepad.Delete(text)
+			if err != nil {
+				printError(err.Error())
+			} else {
+				printOK("note deleted")
+			}
 		case "list":
 			notepad.List(text)
 		case "clear":
@@ -67,220 +91,198 @@ func main() {
 		case "exit":
 			notepad.Exit(text)
 		default:
-			fmt.Printf(unknownCommand, command)
+			printError("unknown command")
 		}
 	}
 }
 
-func NewNotepad(maxNotes int) *Notepad {
+func newNotepad(maxNotes int) *Notepad {
+	if maxNotes < 0 {
+		maxNotes = 0
+	}
 	return &Notepad{
-		Notes:      make([]*Note, maxNotes),
-		MaxNotes:   maxNotes,
-		CurrentIdx: 0,
+		Notes: make([]*Note, 0, maxNotes),
 	}
 }
 
-func GetInput(scanner *bufio.Scanner) (command string, text []string) {
-	fmt.Println("Enter a command and data: ")
-	fmt.Print("> ")
+func getInput(scanner *bufio.Scanner) (command string, text []string) {
 	scanner.Scan()
 	input := scanner.Text()
 	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return "", nil
+	}
 	command = parts[0]
 	text = parts[1:]
 	return command, text
 }
 
-func (n *Notepad) Extend(text []string) {
-	if isEmpty(text) {
-		return
-	}
-
-	extend, err := convertToNumber(text[0])
-	if err != nil {
-		return
-	}
-
-	if extend <= 0 {
-		fmt.Println("Cannot extend to a number that is negative or equal to 0")
-		return
-	}
-
-	n.MaxNotes += extend
-	fmt.Printf(notepadExtended, n.MaxNotes)
-}
-
-func GetIndex(text []string) (index int, err error) {
-	index, err = strconv.Atoi(text[0])
-	if err != nil {
-		return -1, err
-	}
-	return index, nil
-}
-
-func (n *Notepad) Done(text []string) {
-	index, err := GetIndex(text)
-	if err != nil {
-		fmt.Println("Note cannot be converted to done")
-		return
-	}
-	index -= 1
-
-	if n.Notes[index].Done == true {
-		fmt.Println(noteAlreadyDone)
-		return
-	} else {
-		n.Notes[index].Done = true
-	}
-
-	fmt.Println(noteDone)
-}
-
-func (n *Notepad) Undone(text []string) {
-	index, err := GetIndex(text)
-	if err != nil {
-		fmt.Println("Note cannot be converted to undone")
-		return
-	}
-	n.Notes[index-1].Done = false
-	fmt.Println(noteUndone)
-}
-
-func (n *Notepad) Create(text []string) {
-	note := strings.Join(text[:], " ")
-	if n.CurrentIdx >= n.MaxNotes {
-		fmt.Println(notepadFull)
-		return
-	}
-	if note == "" {
-		fmt.Println(missingNoteArg)
-		return
-	}
-
-	newNote := &Note{Text: note, Done: false}
-	n.Notes[n.CurrentIdx] = newNote
-	n.CurrentIdx++
-	fmt.Println(noteCreated)
-}
-
-func (n *Notepad) GetArguments(text []string) (position int, note string) {
-	position, err := convertToNumber(text[0])
-	if err != nil {
-		return -1, ""
-	}
-
-	if position < 0 || position >= n.MaxNotes {
-		fmt.Printf(invalidPosition, position)
-		return -1, ""
-	}
-
-	note = strings.Join(text[1:], " ")
-	return position, note
-}
-
-func (n *Notepad) Update(text []string) {
-	if isEmpty(text) {
-		return
-	}
-
-	index, note := n.GetArguments(text)
-	if index == -1 {
-		return
-	}
-
-	index -= 1
-
-	if n.Notes[index] == nil {
-		fmt.Println(nothingToUpdate)
-		return
-	}
-
-	if note == "" {
-		fmt.Println(missingNoteArg)
-		return
-	}
-
-	n.Notes[index].Text = note
-	fmt.Println(noteUpdated)
-}
-
-func (n *Notepad) Delete(text []string) {
-	if isEmpty(text) {
-		return
-	}
-
+func (n *Notepad) Save(text []string) error {
 	if len(text) != 1 {
-		fmt.Println(invalidArgument)
-		return
+		return errors.New(invalidArgument)
+	}
+	filename := text[0]
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			printError("cannot close file")
+		}
+	}(file)
+
+	notesJSON, err := json.Marshal(n.Notes)
+	if err != nil {
+		return err
+	}
+
+	_, err = file.Write(notesJSON)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (n *Notepad) Load(text []string) error {
+	if len(text) != 1 {
+		return errors.New(invalidArgument)
+	}
+	filename := text[0]
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			printError("cannot close file")
+		}
+	}(file)
+
+	var notes []*Note
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&notes); err != nil {
+		return err
+	}
+
+	n.Notes = notes
+
+	return nil
+}
+
+func (n *Notepad) SetStatus(text []string, status bool) error {
+	if len(text) != 1 {
+		return errors.New(invalidArgument)
+	}
+	index, err := convertToNumber(text[0])
+	if err != nil {
+		return err
+	}
+	index -= 1
+	if index < 0 || index >= len(n.Notes) {
+		return errors.New("[Error] invalid position")
+	}
+	n.Notes[index].Status = status
+	return nil
+}
+
+func (n *Notepad) Create(text []string) error {
+	note := strings.Join(text, " ")
+	if note == "" {
+		return errors.New("missing note argument")
+	}
+	newNote := &Note{Text: note, Status: false}
+	n.Notes = append(n.Notes, newNote)
+	return nil
+}
+
+func (n *Notepad) Update(text []string) error {
+	if len(text) != 2 {
+		return errors.New(invalidArgument)
 	}
 
 	index, err := convertToNumber(text[0])
 	if err != nil {
-		return
+		return err
 	}
 	index -= 1
-
-	if n.Notes[index] == nil {
-		fmt.Println(nothingToDelete)
-		return
+	if index < 0 || index >= len(n.Notes) {
+		return errors.New("incorrect position")
 	}
+	note := strings.Join(text[1:], " ")
+	n.Notes[index].Text = note
+	return nil
+}
 
+func (n *Notepad) Delete(text []string) error {
+	if len(text) != 1 {
+		return errors.New(invalidArgument)
+	}
+	index, err := convertToNumber(text[0])
+	if err != nil {
+		return err
+	}
+	index -= 1
 	n.Notes = append(n.Notes[:index], n.Notes[index+1:]...)
-	n.CurrentIdx -= 1
-	fmt.Println(noteDeleted)
+	return nil
 }
 
 func (n *Notepad) List(text []string) {
-	if len(text) != 0 {
-		fmt.Println(invalidArgument)
+	if !isTextEmpty(text) {
 		return
 	}
-	if n.CurrentIdx == 0 {
-		fmt.Println(notepadEmpty)
+	if len(n.Notes) == 0 {
+		color.Cyan("[Info] Notepad is empty")
 		return
 	}
 	for i, note := range n.Notes {
-		if note != nil {
-			fmt.Printf("%d: %s ", i+1, note.Text)
-			if note.Done == true {
-				fmt.Println(noteStatusDone)
-			}
-			fmt.Println()
+		fmt.Printf("%d: %s ", i+1, note.Text)
+		if note.Status == true {
+			fmt.Print(" / Status: Done")
 		}
+		fmt.Println()
 	}
 }
 
 func (n *Notepad) Clear(text []string) {
-	if len(text) != 0 {
-		fmt.Println(invalidArgument)
+	if !isTextEmpty(text) {
 		return
 	}
-	n.Notes = make([]*Note, n.MaxNotes)
-	n.CurrentIdx = 0
+	n.Notes = make([]*Note, 0, len(n.Notes))
 }
 
 func (n *Notepad) Exit(text []string) {
-	if len(text) != 0 {
-		fmt.Println(invalidArgument)
+	if !isTextEmpty(text) {
 		return
 	}
-	fmt.Println(farewell)
+	color.Cyan("[Info] Goodbye!")
 	os.Exit(0)
 }
 
-func isEmpty(text []string) bool {
+func isTextEmpty(text []string) bool {
 	if len(text) == 0 {
-		fmt.Println(missingNoteArg)
 		return true
+	} else {
+		printError(invalidArgument)
+		return false
 	}
-	return false
 }
 
 func convertToNumber(text string) (int, error) {
 	number, err := strconv.Atoi(text)
 	if err != nil {
-		fmt.Println(cannotConvert)
 		return -1, err
 	}
 	return number, nil
+}
+
+func printError(message string) {
+	color.Red("[Error] " + message)
+}
+
+func printOK(message string) {
+	color.Green("[OK] " + message)
 }
